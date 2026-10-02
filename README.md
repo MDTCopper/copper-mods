@@ -187,63 +187,50 @@ Two details worth knowing:
 
 ### API quota
 
-The scan is built to spend as little of the API quota as possible, because that is what actually keeps it
-running rather than any throttling. Every request it can make:
-
-| Request | When | Counts against the quota |
-| ------- | ---- | ------------------------ |
-| `/search/repositories?q=topic:<topic>` | up to 10 times per scan, 100 repositories each | yes |
-| `/repos/{repo}` | only for repositories that came from the previous index | yes |
-| `raw/.../copper.mod.json` | per repository | no |
-| `raw/.../icon.png` | per repository with an icon | no |
-
-Every run fetches live: there is no response cache, so a scan always sees the current state of GitHub at
-the cost of the requests above.
-
-### Two quotas, not one
-
-GitHub counts the **search endpoints separately** from the rest of the API, and the two have different
-limits - both documented, both reported in the `x-ratelimit-*` headers:
+Two pools with different limits, and the scan is shaped around both. GitHub counts search separately from
+the rest of the API:
 
 | Pool | Authenticated | Anonymous | Window |
 | ---- | ------------- | --------- | ------ |
-| `/search/*` | 30 requests | 10 requests | **per minute** |
+| `/search/*` | 30 | 10 | **per minute** |
 | everything else | 1000 per repository (`GITHUB_TOKEN`) or 5000 per user (PAT) | 60 | per hour |
 
-The run summary prints both, because one number cannot describe them:
+Every request a scan can make, and which pool it draws on:
+
+| Request | When | Pool |
+| ------- | ---- | ---- |
+| `/search/repositories?q=topic:<topic>` | up to 10 times, 100 repositories each | search |
+| `/repos/{repo}` | only for repositories that came from the previous index | core |
+| `raw/.../copper.mod.json` | per repository | none - `raw.githubusercontent.com` is not rate limited like the API |
+| `raw/.../icon.png` | per repository with an icon | none |
+
+A repository found by topic therefore costs **no core quota at all**: the search response already carries
+every field the scan needs (`default_branch`, `stars`, `pushed_at`, `archived`, `is_template`), and the
+meta file and icon come from raw URLs. The releases API is never called, because the index publishes no
+release data. Runs fetch live - there is no response cache - and the summary prints both pools, since one
+number cannot describe them:
 
 ```
 API quota left: core 999/1000, search 29/30, resets in 42s
 ```
 
-Practical consequence: a scan with `--max-pages 10` issues up to ten search requests back to back, which
-exhausts the 30-per-minute search allowance well before the hourly one. The retry policy then waits for
-the minute to roll over - a short wait, so the scan simply paces itself - and the search quota is the
-limit a large scan runs into first, not the core one.
+The search pool is the one a large scan exhausts first: `--max-pages 10` issues up to ten search requests
+back to back, against 30 per minute. That is not a failure - the reset is the next minute boundary, well
+inside the wait the retry policy accepts - so the scan simply paces itself. A token is still worth having,
+for the search allowance and for the repositories that do need a lookup.
 
-### The 1000-result ceiling
+**The 1000-result ceiling.** GitHub's search returns at most 1000 results per query and at most 100 per
+page, so ten pages is every result there is and `--max-pages` is clamped to `10`. That ceiling is why the
+previous `mods.json` is read and merged in, which is also how `Anuken/MindustryMods` grew past it: a
+repository that falls out of the search - newer repositories pushed it past result 1000, or its topic was
+dropped - keeps its entry instead of disappearing. `--keep-missing` controls that; without it, entries the
+search no longer returns are dropped.
 
-GitHub's search API returns **at most 1000 results per query**, and **at most 100 per page** - both are
-documented limits, not choices. So ten pages is every result there is, and `--max-pages` is clamped to
-`10`; asking for more cannot reach more.
-
-That ceiling is why the previous `mods.json` is read and merged in, which is also how
-`Anuken/MindustryMods` grew past it: a repository that falls out of the search - because newer
-repositories pushed it past result 1000, or because a topic was dropped - keeps its entry instead of
-disappearing. `--keep-missing` controls that; without it, entries the search no longer returns are dropped.
-
-- **The search response is the repository metadata.** One `/search/repositories` call returns every field
-  the scan needs (`default_branch`, `stars`, `pushed_at`, `archived`, `is_template`), which is why a
-  topic-discovered repository needs no `/repos/{name}` request at all.
-- **A token is still worth it**, for the search calls and for the repositories that do need a lookup:
-  `GITHUB_TOKEN` in Actions allows 1000 requests per hour per repository, while anonymous access allows
-  60 per hour per IP.
-
-When GitHub does push back, the retry policy follows its documented order of preference: honour
+**When GitHub pushes back**, the retry policy follows its documented order of preference: honour
 `retry-after`, else wait out an exhausted primary quota for `x-ratelimit-reset`, else back off at least a
-minute (doubling, capped). A wait longer than two minutes is refused, and the run fails with a message
-naming the limit - a scheduled run should come back later rather than hold a runner for an hour. Requests
-in flight are capped as well, so raising `--threads` cannot exceed GitHub's concurrency limit.
+minute (doubling, capped). A wait longer than two minutes is refused and the run fails with a message
+naming the limit, because a scheduled run should come back later rather than hold a runner for an hour.
+Requests in flight are capped too, so raising `--threads` cannot exceed GitHub's concurrency limit.
 
 ### Loader version
 
