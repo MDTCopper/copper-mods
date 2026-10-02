@@ -1,0 +1,13 @@
+# build output
+.gradle/
+build/
+out/
+
+# local secrets
+*.token
+.env
+
+# IDE
+.idea/
+*.iml
+.vscode/
