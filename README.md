@@ -200,6 +200,27 @@ running rather than any throttling. Every request it can make:
 Every run fetches live: there is no response cache, so a scan always sees the current state of GitHub at
 the cost of the requests above.
 
+### Two quotas, not one
+
+GitHub counts the **search endpoints separately** from the rest of the API, and the two have different
+limits - both documented, both reported in the `x-ratelimit-*` headers:
+
+| Pool | Authenticated | Anonymous | Window |
+| ---- | ------------- | --------- | ------ |
+| `/search/*` | 30 requests | 10 requests | **per minute** |
+| everything else | 1000 per repository (`GITHUB_TOKEN`) or 5000 per user (PAT) | 60 | per hour |
+
+The run summary prints both, because one number cannot describe them:
+
+```
+API quota left: core 999/1000, search 29/30, resets in 42s
+```
+
+Practical consequence: a scan with `--max-pages 10` issues up to ten search requests back to back, which
+exhausts the 30-per-minute search allowance well before the hourly one. The retry policy then waits for
+the minute to roll over - a short wait, so the scan simply paces itself - and the search quota is the
+limit a large scan runs into first, not the core one.
+
 ### The 1000-result ceiling
 
 GitHub's search API returns **at most 1000 results per query**, and **at most 100 per page** - both are
