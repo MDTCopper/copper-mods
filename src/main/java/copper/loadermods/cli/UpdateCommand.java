@@ -119,8 +119,8 @@ public final class UpdateCommand {
         Files.createDirectories(out);
         Files.writeString(indexPath, json, StandardCharsets.UTF_8);
 
-        Log.info("wrote %s: %d mod(s), %d request(s), %d API quota left",
-                indexPath, entries.size(), github.requestCount(), github.rateLimitRemaining());
+        Log.info("wrote %s: %d mod(s), %d request(s), API quota left: %s",
+                indexPath, entries.size(), github.requestCount(), github.quotaSummary());
         reportSkipped(scanned);
     }
 

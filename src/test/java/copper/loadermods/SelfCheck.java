@@ -40,6 +40,7 @@ public final class SelfCheck {
         loaderRejectsBrokenMetadata();
         loaderValidatesDependencyFilters();
         rateLimitsAreHandledAsDocumented();
+        quotaPoolsAreTrackedSeparately();
         excludesMatchRepositories();
         indexRoundTrips();
 
@@ -209,6 +210,24 @@ public final class SelfCheck {
                 String.valueOf(GitHub.waitFor(3600, false, -1, 1)));
         check("a distant reset is refused", "-1",
                 String.valueOf(GitHub.waitFor(-1, true, 1800, 1)));
+    }
+
+    /**
+     * The two quota pools are counted separately by GitHub, and responses arrive out of order, so the
+     * reported figure has to be the lowest seen for its own pool rather than the last one to land.
+     */
+    private static void quotaPoolsAreTrackedSeparately(){
+        GitHub.RateLimit core = new GitHub.RateLimit(5000, 4200, 0);
+        GitHub.RateLimit later = new GitHub.RateLimit(5000, 4300, 0);
+        check("the lower count wins", "4200", String.valueOf(core.lower(later).remaining()));
+        check("and the other way round", "4200", String.valueOf(later.lower(core).remaining()));
+        check("an unknown observation does not erase a known one", "4200",
+                String.valueOf(core.lower(GitHub.RateLimit.UNKNOWN).remaining()));
+
+        check("an unknown pool says so", "unknown", GitHub.RateLimit.UNKNOWN.toString());
+        check("a known pool reports both numbers", "4200/5000", new GitHub.RateLimit(5000, 4200, -1).toString());
+        check("a limit GitHub did not state is a question mark", "29/?",
+                new GitHub.RateLimit(-1, 29, -1).toString());
     }
 
     // ── exclusions ──────────────────────────────────────────────────────────

@@ -33,8 +33,54 @@ public final class GitHub {
     private final AtomicInteger requests = new AtomicInteger();
     private final Semaphore inFlight = new Semaphore(MAX_CONCURRENT_REQUESTS);
 
-    private volatile int rateLimitRemaining = -1;
-    private volatile int rateLimitLimit = -1;
+    /**
+     * The quota left in each pool. GitHub counts the search endpoints separately from the rest of the
+     * API, and reports both under the same {@code x-ratelimit-*} headers, so they have to be told apart
+     * by the URL of the request that carried them.
+     */
+    private volatile RateLimit coreLimit = RateLimit.UNKNOWN;
+    private volatile RateLimit searchLimit = RateLimit.UNKNOWN;
+
+    /**
+     * The quota one endpoint pool reports.
+     *
+     * @param limit     the pool's requests per hour, or -1 when GitHub stated none
+     * @param remaining requests left in the current hour, or -1 when GitHub stated none
+     * @param resetAt   epoch seconds the window resets at, or -1 when GitHub stated none
+     */
+    public record RateLimit(int limit, int remaining, long resetAt){
+        public static final RateLimit UNKNOWN = new RateLimit(-1, -1, -1L);
+
+        /**
+         * The more pessimistic of two observations of the same pool.
+         *
+         * <p>Requests run in parallel, so responses arrive out of order: keeping the lowest count seen
+         * means the summary reports how little is left, not whichever response happened to finish last.</p>
+         */
+        public RateLimit lower(RateLimit other){
+            if(remaining < 0) return other;
+            if(other.remaining < 0) return this;
+            return other.remaining < remaining ? other : this;
+        }
+
+        /** Seconds until the window resets, or -1 when unknown. */
+        public long remainingSeconds(){
+            return resetAt < 0 ? -1 : resetAt - System.currentTimeMillis() / 1000;
+        }
+
+        /** Whether anything is known about this pool yet. */
+        public boolean known(){
+            return remaining >= 0;
+        }
+
+        @Override
+        public String toString(){
+            if(!known()) return "unknown";
+            String limitText = limit < 0 ? "?" : String.valueOf(limit);
+            long seconds = remainingSeconds();
+            return remaining + "/" + limitText + (seconds < 0 ? "" : ", resets in " + seconds + "s");
+        }
+    }
 
     /**
      * @param token a GitHub token, or {@code null} for anonymous access
@@ -52,13 +98,19 @@ public final class GitHub {
         return requests.get();
     }
 
-    /** The API quota left after the last API response, or -1 when no API call has been made. */
-    public int rateLimitRemaining(){
-        return rateLimitRemaining;
+    /** The quota left in the general API pool, as last observed. */
+    public RateLimit coreLimit(){
+        return coreLimit;
     }
 
-    public int rateLimitLimit(){
-        return rateLimitLimit;
+    /** The quota left in the search pool, which GitHub counts separately. */
+    public RateLimit searchLimit(){
+        return searchLimit;
+    }
+
+    /** Both pools, for a run summary. */
+    public String quotaSummary(){
+        return "core " + coreLimit + ", search " + searchLimit;
     }
 
     // ── API ─────────────────────────────────────────────────────────────────
@@ -161,7 +213,7 @@ public final class GitHub {
         for(int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
             try{
                 HttpResponse<String> response = send(url, api, HttpResponse.BodyHandlers.ofString());
-                recordRateLimit(response);
+                recordRateLimit(url, response);
 
                 int status = response.statusCode();
                 if(status == 403 || status == 429){
@@ -270,19 +322,55 @@ public final class GitHub {
         }
     }
 
-    private void recordRateLimit(HttpResponse<?> response){
-        response.headers().firstValue("x-ratelimit-remaining").ifPresent(value -> {
-            try{
-                rateLimitRemaining = Integer.parseInt(value);
-            }catch(NumberFormatException ignored){
-            }
-        });
-        response.headers().firstValue("x-ratelimit-limit").ifPresent(value -> {
-            try{
-                rateLimitLimit = Integer.parseInt(value);
-            }catch(NumberFormatException ignored){
-            }
-        });
+    /**
+     * Records what a response said about its quota, in the pool that response belongs to.
+     *
+     * @param url      the request's URL, which is what tells the two pools apart
+     * @param response the response, whose headers carry the count
+     */
+    private void recordRateLimit(String url, HttpResponse<?> response){
+        Optional<String> remaining = response.headers().firstValue("x-ratelimit-remaining");
+        if(remaining.isEmpty()) return;
+
+        RateLimit observed;
+        try{
+            observed = new RateLimit(
+                    headerInt(response, "x-ratelimit-limit"),
+                    Integer.parseInt(remaining.get().trim()),
+                    headerLong(response, "x-ratelimit-reset"));
+        }catch(NumberFormatException e){
+            return;
+        }
+
+        if(url.contains("/search/")){
+            searchLimit = searchLimit.lower(observed);
+        }else{
+            coreLimit = coreLimit.lower(observed);
+        }
+    }
+
+    private static int headerInt(HttpResponse<?> response, String name){
+        return response.headers().firstValue(name).map(GitHub::parseInt).orElse(-1);
+    }
+
+    private static long headerLong(HttpResponse<?> response, String name){
+        return response.headers().firstValue(name).map(GitHub::parseLong).orElse(-1L);
+    }
+
+    private static int parseInt(String text){
+        try{
+            return Integer.parseInt(text.trim());
+        }catch(NumberFormatException e){
+            return -1;
+        }
+    }
+
+    private static long parseLong(String text){
+        try{
+            return Long.parseLong(text.trim());
+        }catch(NumberFormatException e){
+            return -1L;
+        }
     }
 
     /** Whether this response says the primary quota is used up, as opposed to a secondary limit. */
@@ -292,9 +380,9 @@ public final class GitHub {
                 .orElse(false);
     }
 
-    /** Whether the quota was seen exhausted at any point, for the run summary. */
+    /** Whether the general API quota was seen exhausted at any point, for the run summary. */
     public boolean rateLimitExhausted(){
-        return rateLimitRemaining == 0;
+        return coreLimit.remaining() == 0;
     }
 
     /** What to do about an exhausted quota. */
