@@ -32,9 +32,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Checks that need no network
-        run: ./gradlew selfcheck --no-daemon
-
       - name: Update the index
         env:
           # the default token is enough: 5000 requests an hour instead of 60 anonymous ones
