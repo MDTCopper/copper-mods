@@ -2,13 +2,11 @@ package copper.loadermods.cli;
 
 import copper.loadermods.index.*;
 import copper.loadermods.net.GitHub;
-import copper.loadermods.net.Json;
 import copper.loadermods.util.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.*;
@@ -42,7 +40,6 @@ public final class UpdateCommand {
      */
     private static final List<String> DEFAULT_EXCLUDES = List.of(
             "mdtcopper/mod-template",
-            "mdtcopper/mod-templete",
             "mdtcopper/template",
             "anuken/examplemod",
             "anuken/examplejavamod",

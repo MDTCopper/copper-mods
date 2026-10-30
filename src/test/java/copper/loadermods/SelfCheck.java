@@ -92,7 +92,7 @@ public final class SelfCheck {
 
     /** The template shipped in this workspace must validate; it is the shape authors copy. */
     private static void loaderParsesTheModTemplate(){
-        Path template = Path.of("..", "mod-templete").toAbsolutePath().normalize();
+        Path template = Path.of("..", "mod-template").toAbsolutePath().normalize();
         if(!Files.isDirectory(template)){
             Log.warn("selfcheck: %s not found, skipping the template check", template);
             return;

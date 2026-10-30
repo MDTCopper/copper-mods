@@ -97,10 +97,10 @@ tasks.register('update', JavaExec) {
 
 tasks.register('validate', JavaExec) {
     group = 'loader-mods'
-    description = 'Validate a local mod directory or jar (default: ../mod-templete).'
+    description = 'Validate a local mod directory or jar (default: ../mod-template).'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = application.mainClass
-    args = ['validate', (project.findProperty('target') ?: '../mod-templete').toString()]
+    args = ['validate', (project.findProperty('target') ?: '../mod-template').toString()]
 }
 
 // The checks live in the test source set, so they are not in the jar and not reachable from Main.

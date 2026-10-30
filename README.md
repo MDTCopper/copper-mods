@@ -116,7 +116,7 @@ the file). Repositories with neither path have no `iconHash`.
 GITHUB_TOKEN=... ./gradlew update -Pargs="--out . --keep-missing"
 
 # check a mod the way the loader does, before publishing it
-./gradlew validate -Ptarget=../mod-templete
+./gradlew validate -Ptarget=../mod-template
 ```
 
 `./gradlew run --args="..."` takes the same flags; `./gradlew run --args="--help"` lists them.

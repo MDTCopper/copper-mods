@@ -105,7 +105,7 @@ https://raw.githubusercontent.com/MTDCopper/copper-mods/main/mods.json
 GITHUB_TOKEN=... ./gradlew update -Pargs="--out . --keep-missing"
 
 # 按加载器的方式校验一个模组，发版前跑
-./gradlew validate -Ptarget=../mod-templete
+./gradlew validate -Ptarget=../mod-template
 ```
 
 `./gradlew run --args="..."` 接受同样的参数；`./gradlew run --args="--help"` 会列出它们。
